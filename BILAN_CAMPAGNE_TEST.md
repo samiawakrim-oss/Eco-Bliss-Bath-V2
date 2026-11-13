@@ -27,7 +27,7 @@ Objectifs mineurs : Vérifier la sécurité avec un test XSS sur les avis, et d�
 - connexion.cy.ts (2) : ouvre la page connexion, affiche les champs email et mot de passe
 - inscription.cy.ts (2) : ouvre la page inscription, affiche les champs du formulaire
 - panier.cy.ts (1) : ajoute un produit au panier
-- api.cy.ts (8) : login inconnu -> 401, login connu -> 200 + token, GET /orders sans token -> 401, PUT /orders/add produit dispo -> 200, PUT /orders/add produit en rupture -> 200 (anomalie), GET /orders avec token -> 200, GET /products/3 -> fiche produit, POST /reviews -> 200
+- api.cy.ts (8) : login inconnu -> 401, login connu -> 200 + token, GET /orders sans token -> 401, PUT /orders/add produit dispo -> 200, PUT /orders/add produit en rupture -> 200 (anomalie constatée), GET /orders avec token -> 200, GET /products/3 -> fiche produit, POST /reviews -> 200
 - xss.cy.ts (1) : injection `<script>alert('XSS')</script>` dans un avis
 
 ## Résultats des tests
@@ -42,16 +42,16 @@ Comparaison attendu / obtenu :
 ### Anomalies / Rapports d'incident
 
 **Anomalie 1 - GET /orders panier vide : 404 au lieu de 200**
-Reproduction : Se connecter, ne rien ajouter au panier, faire GET /orders avec token -> 404. Après PUT /orders/add, GET /orders -> 200. Attendu : 200 avec liste vide [].
+Reproduction : Se connecter, ne rien ajouter au panier, faire GET /orders avec token -> 404. Après PUT /orders/add, GET /orders -> 200. Attendu : 200 avec liste vide []. Observée en test exploratoire.
 
 **Anomalie 2 - PUT /orders/add produit en rupture : 200 au lieu de 400**
-Reproduction : PUT /orders/add avec produit 4 (stock -1) -> 200, produit ajouté. Attendu : 400 ou erreur.
+Reproduction : PUT /orders/add avec produit 4 (stock -1) -> 200, produit ajouté. Attendu : 400 ou erreur. Constatée lors de l'exécution du test automatisé API produit en rupture.
 
 **Anomalie 3 - Stocks négatifs**
 Produit 3 : availableStock = -16, Produit 4 : -1. Attendu : stock >= 0.
 
 **Anomalie 4 - PUT vs POST**
-Documenté POST /orders/add dans Swagger, implémenté en PUT.
+Documenté POST /orders/add dans Swagger, implémenté en PUT. L'API n'accepte que PUT pour obtenir 200.
 
 **Anomalie 5 - GET /orders sans token : 401 au lieu de 403**
 Accès refusé comme attendu, seul le code diffère de la spécification.
@@ -70,11 +70,13 @@ Anomalies à corriger le plus rapidement : n°2 (produit en rupture accepté) et
 
 ### A. Tests à automatiser - Les 2 tests les plus critiques
 
-**1. Test API : Ajout au panier d'un produit en rupture**
-Pourquoi critique : Il vérifie qu'on ne peut pas vendre un produit indisponible. C'est le test qui a détecté l'anomalie la plus grave (200 au lieu de 400). Choisi parce qu'il protège directement le chiffre d'affaires et la satisfaction client.
+Les deux tests retenus tournent autour du panier. Cela reste défendable, car l'un protège la règle métier côté serveur, l'autre protège le parcours côté client.
 
-**2. Test UI : Parcours panier complet**
-Pourquoi critique : Il vérifie le parcours d'achat de bout en bout : voir produit -> ajouter au panier -> vérifier panier. Choisi parce que c'est le parcours qui rapporte de l'argent, si le panier ne marche pas, la boutique ne vend pas.
+**1. Test API : ajout au panier d'un produit en rupture de stock.**
+Ce test vérifie qu'on ne peut pas vendre un produit indisponible. Je l'ai choisi car il protège directement le chiffre d'affaires et la satisfaction client. Une erreur ici passe facilement inaperçue : un site qui n'affiche rien se voit tout de suite par l'équipe et les clients, alors qu'un panier qui accepte un produit en rupture peut passer inaperçu longtemps. On vend alors ce que l'on n'a pas. Lors de l'exécution, le test a constaté que l'API retourne 200 au lieu du 400 attendu.
+
+**2. Test UI : parcours panier complet.**
+Ce test vérifie le parcours d'achat de bout en bout : voir le produit, l'ajouter au panier, contrôler le panier. Je l'ai choisi car c'est le parcours qui génère le revenu. Il couvre aussi indirectement l'affichage des produits : pour tester le panier, le test doit ouvrir un produit, donc afficher la page d'accueil puis la fiche produit. L'inverse n'est pas vrai. Si le panier ne fonctionne pas, la boutique ne vend pas.
 
 ### B. Préconisations pour la suite
 
@@ -82,4 +84,5 @@ Pourquoi critique : Il vérifie le parcours d'achat de bout en bout : voir produ
 - Corriger GET /orders pour retourner 200 avec [] quand le panier est vide.
 - Mettre à jour la documentation Swagger (PUT vs POST, 401 vs 403).
 - Garder les 16 tests automatisés et les lancer à chaque nouvelle version (non-régression).
-- Automatiser aussi : connexion avec mauvais mot de passe, inscription avec email déjà utilisé, et suppression d'un produit du panier. Ils valent le coup d'être automatisés car ils sont rejoués à chaque release.
+- Automatiser dès que le budget le permet : l'affichage des produits et la connexion. Ils sont simples, rapides et utiles en non-régression. L'affichage des produits peut être vérifié par des smoke tests, rapides et simples, en complément du test panier qui le couvre déjà indirectement.
+- Automatiser aussi : inscription avec email déjà utilisé, et suppression d'un produit du panier.

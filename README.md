@@ -37,3 +37,24 @@ npx cypress run
 
 # Un seul fichier
 npx cypress run --spec cypress/e2e/api.cy.ts
+
+```
+## Structure des tests
+
+frontend/cypress/e2e/
+├── produits.cy.ts -> (2 tests)
+├── connexion.cy.ts -> (2 tests)
+├── inscription.cy.ts -> (2 tests)
+├── panier.cy.ts -> (1 test)
+├── api.cy.ts -> (8 tests)
+└── xss.cy.ts -> (1 test)
+
+
+## Résultats
+
+**16/16 tests verts - 0 failing**
+
+## Bilan de campagne
+
+Voir le fichier `BILAN_CAMPAGNE_TEST.md`
+

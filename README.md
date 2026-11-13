@@ -21,3 +21,19 @@ docker compose up -d
 cd frontend
 npm install
 npm start
+
+```
+
+## Lancer les tests Cypress
+
+```bash
+cd frontend
+
+# Mode interactif (on voit les tests s'exécuter)
+npx cypress open
+
+# Mode terminal (tous les tests d'un coup)
+npx cypress run
+
+# Un seul fichier
+npx cypress run --spec cypress/e2e/api.cy.ts

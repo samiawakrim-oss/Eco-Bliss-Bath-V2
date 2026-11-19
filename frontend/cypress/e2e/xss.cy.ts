@@ -1,34 +1,44 @@
-describe('Faille XSS - Avis', () => {
-  let token = ''
+import { API, recupererToken } from '../support/fonctions'
 
+// TEST XSS : un script écrit dans un avis ne doit jamais s'exécuter.
+describe('Faille XSS', () => {
+  // Le script piège : il affiche une alerte s'il s'exécute
+  const script = "<script>alert('XSS')</script>"
+  let token: string
+
+  // Avant les tests : je me connecte par l'API
   before(() => {
-    cy.request({
-      method: 'POST',
-      url: 'http://localhost:8081/login',
-      body: { username: 'samia@test.com', password: 'Test1234!' }
-    }).then((res) => {
-      token = res.body.token
+    recupererToken().then((t) => {
+      token = t
     })
   })
 
-  it('ne doit pas exécuter un script dans un avis', () => {
-    const payload = "<script>alert('XSS')</script>"
-
-    // On envoie un avis avec un script via l'API
+  it('API : un avis avec un script est accepté et stocké comme du texte', () => {
     cy.request({
       method: 'POST',
-      url: 'http://localhost:8081/reviews',
-      headers: { Authorization: `Bearer ${token}` },
-      body: {
-        title: 'Test XSS',
-        comment: payload,
-        rating: 5
-      }
-    }).then((res) => {
-      expect(res.status).to.eq(200)
-      // L'avis est stocké, mais il ne doit pas s'exécuter
-      // On vérifie qu'il est stocké comme du texte
-      expect(res.body.comment).to.eq(payload)
+      url: API + '/reviews',
+      headers: { Authorization: 'Bearer ' + token },
+      body: { title: 'Test XSS', comment: script, rating: 5 },
+    }).then((reponse) => {
+      expect(reponse.status).to.eq(200)
+      // Le texte est gardé tel quel : la protection se fait à l'affichage
+      expect(reponse.body.comment).to.eq(script)
+    })
+  })
+
+  it('Site : le script de l\'avis ne s\'exécute pas', () => {
+    // Je prépare un détecteur : il se déclenche si une alerte apparaît
+    const alerte = cy.stub()
+    cy.on('window:alert', alerte)
+
+    // J'ouvre la page des avis, où le script est affiché
+    cy.visit('/#/reviews')
+    // Une seconde pour laisser le site afficher les avis
+    cy.wait(1000)
+
+    // Le détecteur ne doit jamais avoir été déclenché
+    cy.then(() => {
+      expect(alerte).not.to.have.been.called
     })
   })
 })

@@ -1,152 +1,122 @@
-describe('API Eco-Bliss', () => {
+import { API, EMAIL, MOT_DE_PASSE, recupererToken, ajouterAuPanier, lirePanier } from '../support/fonctions'
 
-  // Adresse du serveur backend
-  const API_URL = 'http://localhost:8081'
+// TESTS API : on parle directement au serveur, sans passer par le site.
+describe('API', () => {
+  // Ces deux variables sont remplies avant les tests
+  let token: string
+  let produits: any[]
 
-  // Variable qui va contenir le token
-  let token = ''
-
-  // Avant les tests, récupérer un token de connexion
+  // Avant les tests : je me connecte et je récupère la liste des produits
   before(() => {
-    cy.request({
-      method: 'POST',
-      url: `${API_URL}/login`,
-      body: {
-        username: 'samia@test.com',
-        password: 'Test1234!'
-      }
-    }).then((res) => {
-      expect(res.status).to.eq(200)
-      expect(res.body).to.have.property('token')
-      token = res.body.token
+    recupererToken().then((t) => {
+      token = t
+    })
+    cy.request(API + '/products').then((reponse) => {
+      produits = reponse.body
     })
   })
 
-  // TEST 1 : connexion avec un utilisateur inconnu
-  it('Login utilisateur inconnu -> 401', () => {
+  it('login utilisateur inconnu -> 401', () => {
     cy.request({
       method: 'POST',
-      url: `${API_URL}/login`,
-      body: {
-        username: 'inconnu@test.com',
-        password: 'Faux1234!'
-      },
-      failOnStatusCode: false
-    }).then((res) => {
-      expect(res.status).to.eq(401)
-      expect(res.body).to.have.property('message', 'Invalid credentials.')
+      url: API + '/login',
+      body: { username: 'inconnu@test.com', password: 'Faux1234!' },
+      // Sans cette ligne, Cypress s'arrête dès qu'il reçoit une erreur
+      failOnStatusCode: false,
+    }).then((reponse) => {
+      // Résultat attendu : accès refusé
+      expect(reponse.status).to.eq(401)
     })
   })
 
-  // TEST 2 : connexion avec un utilisateur connu
-  it('Login utilisateur connu -> 200 + token', () => {
+  it('login utilisateur connu -> 200 + token', () => {
     cy.request({
       method: 'POST',
-      url: `${API_URL}/login`,
-      body: {
-        username: 'samia@test.com',
-        password: 'Test1234!'
-      }
-    }).then((res) => {
-      expect(res.status).to.eq(200)
-      expect(res.body).to.have.property('token')
+      url: API + '/login',
+      body: { username: EMAIL, password: MOT_DE_PASSE },
+    }).then((reponse) => {
+      // Résultat attendu : connexion réussie et un token reçu
+      expect(reponse.status).to.eq(200)
+      expect(reponse.body).to.have.property('token')
     })
   })
 
-  // TEST 3 : accéder aux commandes sans token
   it('GET /orders sans token -> 401', () => {
     cy.request({
       method: 'GET',
-      url: `${API_URL}/orders`,
-      failOnStatusCode: false
-    }).then((res) => {
-      expect(res.status).to.eq(401)
+      url: API + '/orders',
+      failOnStatusCode: false,
+    }).then((reponse) => {
+      // 401 = personne non connectée (la spécification parlait de 403 : anomalie 5)
+      expect(reponse.status).to.eq(401)
     })
   })
 
-  // TEST 4 : ajouter un produit dispo au panier
-  // On le met AVANT le GET /orders, pour que GET trouve une commande
-  it('PUT /orders/add produit dispo -> 200', () => {
-    cy.request({
-      method: 'PUT',
-      url: `${API_URL}/orders/add`,
-      headers: {
-        Authorization: `Bearer ${token}`
-      },
-      body: {
-        product: 3,
-        quantity: 1
-      }
-    }).then((res) => {
-      // Vérifier que le panier est mis à jour
-      expect(res.status).to.eq(200)
+  it('PUT /orders/add produit disponible -> 200', () => {
+    // Je cherche un produit qui a du stock
+    const produit = produits.find((p) => p.availableStock > 1)
+    ajouterAuPanier(token, produit.id, 1).then((reponse) => {
+      expect(reponse.status).to.eq(200)
     })
   })
 
-// TEST 5 : ajouter un produit en rupture de stock
-  // Anomalie : le produit 4 a un stock de -1 (rupture)
-  // L'API devrait refuser, mais elle retourne 200 et l'ajoute
-  it('PUT /orders/add produit en rupture -> 200 mais anomalie', () => {
-    cy.request({
-      method: 'PUT',
-      url: `${API_URL}/orders/add`,
-      headers: {
-        Authorization: `Bearer ${token}`
-      },
-      body: {
-        product: 4,
-        quantity: 1
-      }
-    }).then((res) => {
-      // Comportement réel : 200, même en rupture
-      // Comportement attendu : erreur 400 ou 403
-      expect(res.status).to.eq(200)
+  it('PUT /orders/add produit en rupture -> doit être refusé', () => {
+    // Je cherche un produit dont le stock est à 0 ou moins
+    const produit = produits.find((p) => p.availableStock <= 0)
+    expect(produit, 'il faut un produit en rupture').to.exist
+    ajouterAuPanier(token, produit.id, 1).then((reponse) => {
+      // Attendu : une erreur (400 à 499). Si l'API répond 200, le test échoue : anomalie 1
+      expect(reponse.status).to.be.within(400, 499)
     })
   })
 
-  // TEST 6 : accéder aux commandes avec un token
   it('GET /orders avec token -> 200', () => {
-    cy.request({
-      method: 'GET',
-      url: `${API_URL}/orders`,
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
-    }).then((res) => {
-      expect(res.status).to.eq(200)
+    // Je m'assure que le panier n'est pas vide (un panier vide renvoie 404 : anomalie 3)
+    const produit = produits.find((p) => p.availableStock > 1)
+    ajouterAuPanier(token, produit.id, 1)
+    lirePanier(token).then((reponse) => {
+      expect(reponse.status).to.eq(200)
     })
   })
 
-  // TEST 7 : récupérer un produit
-  it('GET /products/3 -> fiche produit', () => {
-    cy.request({
-      method: 'GET',
-      url: `${API_URL}/products/3`
-    }).then((res) => {
-      expect(res.status).to.eq(200)
-      expect(res.body).to.have.property('name')
+  it('GET /products -> chaque produit a ses champs', () => {
+    cy.request(API + '/products').then((reponse) => {
+      expect(reponse.status).to.eq(200)
+      // Je vérifie TOUS les produits, un par un
+      reponse.body.forEach((produit: any) => {
+        expect(produit).to.have.property('id')
+        expect(produit).to.have.property('name')
+        expect(produit).to.have.property('price')
+        expect(produit).to.have.property('availableStock')
+      })
     })
   })
 
-  // TEST 8 : ajouter un avis
+  it('GET /products -> aucun stock négatif', () => {
+    cy.request(API + '/products').then((reponse) => {
+      reponse.body.forEach((produit: any) => {
+        // Un stock ne peut pas être inférieur à 0 : sinon, anomalie 2
+        expect(produit.availableStock).to.be.at.least(0)
+      })
+    })
+  })
+
+  it('GET /products/{id} -> fiche d\'un produit', () => {
+    cy.request(API + '/products/' + produits[0].id).then((reponse) => {
+      expect(reponse.status).to.eq(200)
+      expect(reponse.body).to.have.property('name')
+    })
+  })
+
   it('POST /reviews -> 200', () => {
     cy.request({
       method: 'POST',
-      url: `${API_URL}/reviews`,
-      headers: {
-        Authorization: `Bearer ${token}`
-      },
-      body: {
-        title: 'Super savon',
-        comment: 'Super savon, test API',
-        rating: 5
-      }
-    }).then((res) => {
-      // Vérifier que l'avis est créé
-      expect(res.status).to.eq(200)
-      expect(res.body).to.have.property('title', 'Super savon')
+      url: API + '/reviews',
+      headers: { Authorization: 'Bearer ' + token },
+      body: { title: 'Super savon', comment: 'Test API', rating: 5 },
+    }).then((reponse) => {
+      expect(reponse.status).to.eq(200)
+      expect(reponse.body).to.have.property('title', 'Super savon')
     })
   })
-  
 })
-
